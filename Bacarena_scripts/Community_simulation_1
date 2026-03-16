@@ -1,0 +1,165 @@
+## the script used only for the first cycle
+library(lattice)
+library(ReacTran)
+library(rootSolve)
+library(deSolve)
+library(shape)
+library(sybil)
+library(Matrix)
+library(BacArena)
+library(parallel)
+library(cplexAPI)
+SYBIL_SETTINGS("SOLVER", "cplexAPI")
+option_list = list(
+  optparse::make_option(c("-o", "--otu_name"),                 type="character",      default='8taxa',       help="OTU_name, defalt: 8taxa"),
+  optparse::make_option(c("-D", "--infile_BacarenaRDS_diet"),  type="character",      default="/srv/scratch/z5095298/software/gapseq/Diets_Sponges_July_2019/Diet_Sponges_July_2019_dl20190807_Shan_v20210425/Diet_Sponges_July_2019_dl20190807_Shan_v20210425_brief_v2_IDcheck_mineral_sw_210514/Diet_for_BacArena/mineral_sw_210514_OTU08_3_BacArena_realistic_simplified_9999_NH3only.RDS",
+                        help="Diet RDS file for bacarena with full path, defalt: /srv/scratch/z5095298/software/gapseq/Diets_Sponges_July_2019/Diet_Sponges_July_2019_dl20190807_Shan_v20210425/Diet_Sponges_July_2019_dl20190807_Shan_v20210425_brief_v2_IDcheck_mineral_sw_210514/Diet_for_BacArena/mineral_sw_210514_OTU08_3_BacArena_realistic_simplified_9999_NH3only.RDS"),
+  optparse::make_option(c("-k", "--keywd"),                    type="character",      default="sw_v20210716",    help="(Nutirent/date) keyword used in the folder name of output files, defalt: sw_v20210716"),
+  optparse::make_option(c("-r", "--rm_rate"),   type="double",       default=0,        help="removeM value, defalt: 0"),
+  optparse::make_option(c("-p", "--tstep"),     type="double",       default=1,         help="Time step, defalt: 1h per iteration"),
+  
+  optparse::make_option(c("-a", "--arena_mn"),              type="double",       default=20,        help="integer indicating the length of an arena, defalt: 20"),
+  optparse::make_option(c("-d", "--death_r"),               type="double",       default=0,         help="A percentage of biomass reduce due to the nutrient limitation, defalt: 0"),
+  optparse::make_option(c("-i", "--inocc_no"),              type="double",       default=1,         help="inocculum, defalt: 1"),
+  optparse::make_option(c("-c", "--cl_no"),                 type="double",       default=1,         help="Number of replicates, defalt: 1"),
+  optparse::make_option(c("-s", "--setAllExInf_value"),     type="character",    default='FALSE',   help="setAllExInf, defalt: FALSE"),
+  optparse::make_option(c("-g", "--NutConPercent"),         type="double",       default=100,       help="percentage of nutrients, defalt: 100 (unit: %)"),
+  optparse::make_option(c("-n", "--auto_num"),              type="double",       default=1,         help="surfix in the simulation RDS file name."),
+  optparse::make_option(c("-S", "--difspeed"),              type="double",       default=1.7e-09,   help="A number indicating the diffusion speed (given by number of cells per iteration), defalt: 1.7e-09 cm2 h-1"),
+  optparse::make_option(c("-t", "--iter"),                  type="double",       default=5,         help="Number of iteration, defalt:5"));
+
+opt_parser = optparse::OptionParser(option_list=option_list, add_help_option=FALSE);
+opt = optparse::parse_args(opt_parser);
+
+otu_name        = opt$otu_name
+infile_diet     = opt$infile_BacarenaRDS_diet
+keywd           = opt$keywd
+grid_no   = opt$arena_mn
+death_r   = opt$death_r
+Inocc_no  = opt$inocc_no
+Cl_no     = opt$cl_no
+setAllExInf_value = opt$setAllExInf_value
+NutConPercent   = opt$NutConPercent
+iter_no   = opt$iter
+rm_rate   = opt$rm_rate##########removing may take place between last iter and this iter,check number of cell by simlist[['type]]==n
+time_step =  opt$tstep
+auto_num  = opt$auto_num
+difspeed = opt$difspeed
+
+#####################################################################################################################################################################
+
+diet <- readRDS(infile_diet)#/srv/scratch/z5245780/SpongeMAGs_Robbins_ISME/all_sponge_DB_bins_over50pctComp/CAR/genome/Bacarena_community/Bacarena_medium/commounity-medium_seawater_0713.RDS
+#####################################################################################################################################################################
+getwd <- getwd()
+getwd
+# create a new folder:
+
+new_folder = paste(otu_name,'_',keywd,'_death_',death_r,'_rmRate_',rm_rate,'_NutPer_',NutConPercent,'_Inoc_',Inocc_no, '_tstep_',time_step,'h_difspeed_',difspeed,'/',sep = '')
+dir.create(paste(getwd,'/',new_folder,sep = ''))
+dir_gs_models='/srv/scratch/z5245780/SpongeMAGs_Robbins_ISME/all_sponge_DB_bins_over50pctComp/CAR/genome/Bacarena_community/mag_data'
+
+
+model1 <- readRDS(paste(dir_gs_models,'/cluster_CAR1_bin_2_draft_adapt_2024_07_26.RDS',sep=''))
+model2 <- readRDS(paste(dir_gs_models,'/cluster_CAR1_bin_5_draft_adapt_2024_07_26.RDS',sep=''))
+model3 <- readRDS(paste(dir_gs_models,'/cluster_CAR1_bin_9_draft_adapt_2022_12_23.RDS',sep=''))
+model4 <- readRDS(paste(dir_gs_models,'/cluster_CAR1_bin_16_draft_adapt_2022_12_06.RDS',sep=''))
+model5 <- readRDS(paste(dir_gs_models,'/cluster_CAR2_bin_8_draft_adapt_2024_07_26.RDS',sep=''))
+model6 <- readRDS(paste(dir_gs_models,'/cluster_CAR2_bin_10_draft_adapt_2024_07_26.RDS',sep=''))
+model7 <- readRDS(paste(dir_gs_models,'/cluster_CAR2_bin_11_draft_adapt_2024_07_26.RDS',sep=''))
+model8 <- readRDS(paste(dir_gs_models,'/cluster_CAR2_bin_14_draft_adapt_2024_07_26.RDS',sep=''))
+model9 <- readRDS(paste(dir_gs_models,'/cluster_CAR3_bin_1_draft_adapt_2024_07_26.RDS',sep=''))
+model10 <- readRDS(paste(dir_gs_models,'/cluster_CAR3_bin_2_draft_adapt_2024_07_26.RDS',sep=''))
+model11 <- readRDS(paste(dir_gs_models,'/cluster_CAR3_bin_5_draft_adapt_2024_07_26.RDS',sep=''))
+model12 <- readRDS(paste(dir_gs_models,'/cluster_CAR3_bin_6_draft_adapt_2022_12_07.RDS',sep=''))
+model13 <- readRDS(paste(dir_gs_models,'/cluster_CAR3_bin_7_draft_adapt_2024_07_26.RDS',sep=''))
+model14 <- readRDS(paste(dir_gs_models,'/cluster_CAR3_bin_11_draft_adapt_2023_03_09.RDS',sep=''))
+model15 <- readRDS(paste(dir_gs_models,'/cluster_CAR3_bin_17_draft_adapt_2024_07_26.RDS',sep=''))
+model16 <- readRDS(paste(dir_gs_models,'/cluster_CAR3_bin_20_draft_adapt_2023_03_09.RDS',sep=''))
+model17 <- readRDS(paste(dir_gs_models,'/cluster_CAR4_bin_8_draft_adapt_2024_07_26.RDS',sep=''))
+model18 <- readRDS(paste(dir_gs_models,'/cluster_CAR4_bin_9_draft_adapt_2024_07_26.RDS',sep=''))
+model19 <- readRDS(paste(dir_gs_models,'/cluster_CAR4_bin_12_draft_adapt_2024_07_26.RDS',sep=''))
+
+############# User-define the following lines using your models on Katana ############# 
+replicates <- Cl_no
+cores <- Cl_no
+cl <- makeCluster(cores, type="PSOCK")
+clusterExport(cl, c("diet","model1","model2","model3","model4","model5","model6","model7","model8","model9","model10","model11","model12","model13","model14","model15","model16","model17","model18","model19",
+                    "getwd","new_folder","grid_no","death_r","Inocc_no","iter_no","replicates",
+                    "cores","setAllExInf_value","rm_rate","time_step","NutConPercent","auto_num","difspeed"))
+clusterEvalQ(cl, sink(paste0(getwd,'/',new_folder, Sys.time(), ".txt")))
+
+simlist <- parLapply(cl, 1:replicates, function(i){
+  sybil::SYBIL_SETTINGS("SOLVER", "cplexAPI") #https://github.com/euba/BacArena/issues/152
+  print("====================================================================================================")
+  print(paste("=============================", Sys.time(), '=======================================', sep = ' '))
+  print(paste("============================= auto_num=", auto_num, '=======================================', sep = ' '))
+  print("====================================================================================================")
+  arena <- BacArena::Arena(n=grid_no,m=grid_no,Lx=0.012,Ly=0.012) # This grid length represents there are 100 cell distance between two microbial cells.
+  inocc <- arena@n * arena@m * Inocc_no
+  bacterium1        <- BacArena::Bac(model1,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium1@type<-"cluster_CAR1_bin_2" ######to avoid making bacarena consider our model as the same, this should be finally made by delete part of code in Arena.R
+  bacterium2        <- BacArena::Bac(model2,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium2@type<-"cluster_CAR1_bin_5"
+  bacterium3        <- BacArena::Bac(model3,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium3@type<-"cluster_CAR1_bin_9"
+  bacterium4        <- BacArena::Bac(model4,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium4@type<-"cluster_CAR1_bin_16"
+  bacterium5        <- BacArena::Bac(model5,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium5@type<-"cluster_CAR2_bin_8"
+  bacterium6        <- BacArena::Bac(model6,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium6@type<-"cluster_CAR2_bin_10"
+  bacterium7        <- BacArena::Bac(model7,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium7@type<-"cluster_CAR2_bin_11"
+  bacterium8        <- BacArena::Bac(model8,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium8@type<-"cluster_CAR2_bin_14"
+  bacterium9        <- BacArena::Bac(model9,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium9@type<-"cluster_CAR3_bin_1"
+  bacterium10        <- BacArena::Bac(model10,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium10@type<-"cluster_CAR3_bin_2"
+  bacterium11        <- BacArena::Bac(model11,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium11@type<-"cluster_CAR3_bin_5"
+  bacterium12        <- BacArena::Bac(model12,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium12@type<-"cluster_CAR3_bin_6"
+  bacterium13        <- BacArena::Bac(model13,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium13@type<-"cluster_CAR3_bin_7"
+  bacterium14        <- BacArena::Bac(model14,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium14@type<-"cluster_CAR3_bin_11"
+  bacterium15        <- BacArena::Bac(model15,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium15@type<-"cluster_CAR3_bin_17"
+  bacterium16        <- BacArena::Bac(model16,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium16@type<-"cluster_CAR3_bin_20"
+  bacterium17        <- BacArena::Bac(model17,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium17@type<-"cluster_CAR4_bin_8"
+  bacterium18        <- BacArena::Bac(model18,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium18@type<-"cluster_CAR4_bin_9"
+  bacterium19        <- BacArena::Bac(model19,       lyse = T,deathrate=death_r,maxweight = 1, minweight=0.125,cellweight_mean = 0.5,cellweight_sd = 0.25, growtype='exponential',setAllExInf=setAllExInf_value,limit_growth = T)
+  bacterium19@type<-"cluster_CAR4_bin_12"
+  arena <- BacArena::addOrg(object = arena, specI = bacterium1, amount = inocc*0.17128) # amount can be added by fraction.
+  arena <- BacArena::addOrg(object = arena, specI = bacterium2, amount = inocc*0.02740)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium3, amount = inocc*0.03938)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium4, amount = inocc*0.09281)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium5, amount = inocc*0.00624)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium6, amount = inocc*0.01184)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium7, amount = inocc*0.01890)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium8, amount = inocc*0.02726)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium9, amount = inocc*0.01327) # amount can be added by fraction.
+  arena <- BacArena::addOrg(object = arena, specI = bacterium10, amount = inocc*0.05247)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium11, amount = inocc*0.05607)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium12, amount = inocc*0.17165)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium13, amount = inocc*0.01231)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium14, amount = inocc*0.04731)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium15, amount = inocc*0.00932)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium16, amount = inocc*0.03478)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium17, amount = inocc*0.14024)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium18, amount = inocc*0.01104)
+  arena <- BacArena::addOrg(object = arena, specI = bacterium19, amount = inocc*0.01079)
+  arena <- BacArena::addSubs(object = arena, mediac = diet$Exchange, difunc = "pde",
+                             pde = "Diff2d", difspeed = difspeed, smax = diet$Input_mM*NutConPercent/100, unit = "mM", add = F) #Replenish all nutrients by "replacing" (add=F meaning replacing while add=T meaning summing up) after part of population removed.
+  arena@tstep <- time_step
+  simulation <- BacArena::simEnv(object = arena, time = 1, sec_obj = "opt_ex", continue = T)
+  
+})
+stopCluster(cl)
+saveRDS(simlist, file = paste(getwd,'/',new_folder,'/BacArena_',otu_name,'_400grids_mineral_sw_',auto_num,'.RDS',sep = ''))
+
+
